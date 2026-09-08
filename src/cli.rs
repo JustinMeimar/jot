@@ -2,7 +2,7 @@ use crate::config::Config;
 use clap::{ArgAction, CommandFactory, FromArgMatches, Parser, Subcommand};
 
 pub const RESERVED_NAMES: &[&str] =
-    &["init", "list", "rename", "remove", "search"];
+    &["init", "list", "open", "rename", "remove", "search"];
 
 #[derive(Parser)]
 #[command(name = "jot", about = "dated note taker with configurable variants")]
@@ -15,8 +15,13 @@ struct RawCli {
 pub enum Cmd {
     #[command(about = "initialize ~/.jot")]
     Init,
-    #[command(about = "list configured variants")]
-    List,
+    #[command(about = "list variants and their most recent notes")]
+    List {
+        #[arg(short = 'k', long = "limit", default_value_t = 5, value_name = "K")]
+        limit: usize,
+    },
+    #[command(about = "open ~/.jot in $EDITOR")]
+    Open,
     #[command(about = "rename a variant")]
     Rename { from: String, to: String },
     #[command(about = "remove a variant")]

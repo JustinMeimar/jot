@@ -22,7 +22,8 @@ fn run() -> Result<()> {
     let config = config::load(&home)?;
     match cli::parse(&config) {
         Action::Static(Cmd::Init) => commands::init(&home),
-        Action::Static(Cmd::List) => commands::list(&config),
+        Action::Static(Cmd::List { limit }) => commands::list(&home, &config, limit),
+        Action::Static(Cmd::Open) => commands::open(&home),
         Action::Static(Cmd::Rename { from, to }) => {
             commands::rename(&home, &from, &to)
         }

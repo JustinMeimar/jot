@@ -4,7 +4,7 @@ use crate::frontmatter;
 use crate::io as jot_io;
 use crate::paths;
 use crate::resolve;
-use chrono::Local;
+use chrono::{Local, NaiveDateTime};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -19,19 +19,81 @@ pub fn init(home: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn list(config: &Config) -> Result<()> {
+pub fn list(home: &Path, config: &Config, limit: usize) -> Result<()> {
     if config.jot.is_empty() {
         println!("no variants configured");
         return Ok(());
     }
+
+    let label_width = config
+        .jot
+        .iter()
+        .map(|(key, variant)| variant_label(key, &variant.subcommand).chars().count())
+        .max()
+        .unwrap_or(0);
+
     for (key, variant) in &config.jot {
-        let desc = variant.description.as_deref().unwrap_or("");
-        println!(
-            "  {:<12} [alias: {}]  {}",
-            key, variant.subcommand, desc
-        );
+        let mut notes = Vec::new();
+        collect_notes(&paths::variant_dir(home, key), Path::new(""), &mut notes)?;
+        notes.sort_by(|a, b| {
+            b.timestamp
+                .cmp(&a.timestamp)
+                .then_with(|| b.path.cmp(&a.path))
+        });
+
+        let label = variant_label(key, &variant.subcommand);
+        let rule = "-".repeat(16 + label_width.saturating_sub(label.chars().count()));
+        println!("{label} {rule} ({})", notes.len());
+
+        let shown = notes.len().min(limit);
+        for (index, note) in notes.iter().take(shown).enumerate() {
+            let connector = if index + 1 == shown { "└──" } else { "├──" };
+            println!("{connector} {}", note.path.display());
+        }
     }
     Ok(())
+}
+
+fn variant_label(key: &str, alias: &str) -> String {
+    format!("{key} ('{alias}')")
+}
+
+struct ListedNote {
+    path: PathBuf,
+    timestamp: Option<NaiveDateTime>,
+}
+
+fn collect_notes(dir: &Path, relative_dir: &Path, notes: &mut Vec<ListedNote>) -> Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let relative_path = relative_dir.join(entry.file_name());
+        if file_type.is_dir() {
+            collect_notes(&entry.path(), &relative_path, notes)?;
+        } else if file_type.is_file()
+            && entry.path().extension().and_then(|extension| extension.to_str()) == Some("md")
+        {
+            let timestamp = note_timestamp(&relative_path);
+            notes.push(ListedNote {
+                path: relative_path,
+                timestamp,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn note_timestamp(path: &Path) -> Option<NaiveDateTime> {
+    let stem = path.file_stem()?.to_str()?;
+    NaiveDateTime::parse_from_str(stem, "%m-%d-%Y_%H-%M").ok()
+}
+
+pub fn open(home: &Path) -> Result<()> {
+    jot_io::open_editor(home)
 }
 
 pub fn rename(home: &Path, from: &str, to: &str) -> Result<()> {
@@ -195,4 +257,25 @@ fn scan_dir(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    #[test]
+    fn note_timestamp_comes_from_generated_filename() {
+        assert_eq!(
+            note_timestamp(Path::new("nested/08-27-2026_17-51.md")),
+            NaiveDate::from_ymd_opt(2026, 8, 27)
+                .unwrap()
+                .and_hms_opt(17, 51, 0)
+        );
+    }
+
+    #[test]
+    fn note_timestamp_ignores_manually_named_files() {
+        assert_eq!(note_timestamp(Path::new("nested/ideas.md")), None);
+    }
 }
